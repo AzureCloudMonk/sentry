@@ -1,10 +1,11 @@
 from __future__ import absolute_import
 
+from sentry.api.authentication import ClientIdSecretAuthentication
 from sentry.api.base import Endpoint, SessionAuthentication
 from sentry.api.exceptions import ResourceDoesNotExist
 from sentry.api.permissions import ScopedPermission
-from sentry.app import raven
 from sentry.models import SentryApp, SentryAppInstallation
+from sentry.utils.sdk import configure_scope
 
 
 class SentryAppDetailsPermission(ScopedPermission):
@@ -24,9 +25,8 @@ class SentryAppDetailsEndpoint(Endpoint):
 
         self.check_object_permissions(request, sentry_app)
 
-        raven.tags_context({
-            'sentry_app': sentry_app.id,
-        })
+        with configure_scope() as scope:
+            scope.set_tag("sentry_app", sentry_app.id)
 
         kwargs['sentry_app'] = sentry_app
         return (args, kwargs)
@@ -51,20 +51,20 @@ class SentryAppInstallationDetailsEndpoint(Endpoint):
 
         self.check_object_permissions(request, install)
 
-        raven.tags_context({
-            'sentry_app_installation': install.id,
-        })
+        with configure_scope() as scope:
+            scope.set_tag("sentry_app_installation", install.id)
 
         kwargs['install'] = install
         return (args, kwargs)
 
 
-class SentryAppInstallationAuthorizationPermission(ScopedPermission):
+class SentryAppAuthorizationPermission(ScopedPermission):
     def has_object_permission(self, request, view, install):
         if not request.user.is_sentry_app:
             return False
         return request.user == install.sentry_app.proxy_user
 
 
-class SentryAppInstallationAuthorizationEndpoint(SentryAppInstallationDetailsEndpoint):
-    permission_classes = (SentryAppInstallationAuthorizationPermission, )
+class SentryAppAuthorizationEndpoint(SentryAppInstallationDetailsEndpoint):
+    authentication_classes = (ClientIdSecretAuthentication, )
+    permission_classes = (SentryAppAuthorizationPermission, )

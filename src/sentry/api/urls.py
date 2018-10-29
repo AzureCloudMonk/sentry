@@ -94,6 +94,7 @@ from .endpoints.organization_repository_commits import OrganizationRepositoryCom
 from .endpoints.organization_repository_details import OrganizationRepositoryDetailsEndpoint
 from .endpoints.organization_sentry_app_installations import OrganizationSentryAppInstallationsEndpoint
 from .endpoints.organization_sentry_app_installation_details import OrganizationSentryAppInstallationDetailsEndpoint
+from .endpoints.organization_sentry_apps import OrganizationSentryAppsEndpoint
 from .endpoints.organization_stats import OrganizationStatsEndpoint
 from .endpoints.organization_teams import OrganizationTeamsEndpoint
 from .endpoints.organization_user_issues import OrganizationUserIssuesEndpoint
@@ -156,6 +157,7 @@ from .endpoints.debug_files import DebugFilesEndpoint, DifAssembleEndpoint, \
     UnknownDebugFilesEndpoint, AssociateDSymFilesEndpoint
 from .endpoints.sentry_apps import SentryAppsEndpoint
 from .endpoints.sentry_app_details import SentryAppDetailsEndpoint
+from .endpoints.sentry_app_authorizations import SentryAppAuthorizationsEndpoint
 from .endpoints.shared_group_details import SharedGroupDetailsEndpoint
 from .endpoints.system_health import SystemHealthEndpoint
 from .endpoints.system_options import SystemOptionsEndpoint
@@ -617,6 +619,11 @@ urlpatterns = patterns(
         r'^organizations/(?P<organization_slug>[^\/]+)/sentry-app-installations/(?P<uuid>[^\/]+)/$',
         OrganizationSentryAppInstallationDetailsEndpoint.as_view(),
         name='sentry-api-0-organization-sentry-app-installations-details'
+    ),
+    url(
+        r'^organizations/(?P<organization_slug>[^\/]+)/sentry-apps/$',
+        OrganizationSentryAppsEndpoint.as_view(),
+        name='sentry-api-0-organization-sentry-apps'
     ),
     url(
         r'^organizations/(?P<organization_slug>[^\/]+)/stats/$',
@@ -1108,6 +1115,12 @@ urlpatterns = patterns(
         r'^sentry-apps/(?P<sentry_app_slug>[^\/]+)/$',
         SentryAppDetailsEndpoint.as_view(),
         name='sentry-api-0-sentry-app-details'
+    ),
+
+    url(
+        r'^sentry-app-installations/(?P<uuid>[^\/]+)/authorizations/$',
+        SentryAppAuthorizationsEndpoint.as_view(),
+        name='sentry-api-0-sentry-app-authorizations'
     ),
 
     # Internal

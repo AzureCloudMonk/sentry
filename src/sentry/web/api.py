@@ -29,12 +29,11 @@ from querystring_parser import parser
 from symbolic import ProcessMinidumpError
 
 from sentry import features, quotas, tsdb, options
-from sentry.app import raven
 from sentry.attachments import CachedAttachment
 from sentry.coreapi import (
-    APIError, APIForbidden, APIRateLimited, ClientApiHelper, SecurityApiHelper, LazyData,
-    MinidumpApiHelper,
+    APIError, APIForbidden, APIRateLimited, ClientApiHelper, SecurityApiHelper, MinidumpApiHelper, safely_load_json_string, logger as api_logger
 )
+from sentry.event_manager import EventManager
 from sentry.interfaces import schemas
 from sentry.interfaces.base import get_interface
 from sentry.lang.native.utils import merge_minidump_event
@@ -240,7 +239,6 @@ class APIView(BaseView):
         project = self._get_project_from_id(project_id)
         if project:
             helper.context.bind_project(project)
-            raven.tags_context(helper.context.get_tags_context())
 
         if origin is not None:
             # This check is specific for clients who need CORS support
@@ -267,7 +265,6 @@ class APIView(BaseView):
                 raise APIError('Two different projects were specified')
 
             helper.context.bind_auth(auth)
-            raven.tags_context(helper.context.get_tags_context())
 
             # Explicitly bind Organization so we don't implicitly query it later
             # this just allows us to comfortably assure that `project.organization` is safe.
@@ -367,6 +364,10 @@ class StoreView(APIView):
             response['X-Sentry-ID'] = response_or_event_id
         return response
 
+    def pre_normalize(self, data, helper):
+        """Mutate the given EventManager. Hook for subtypes of StoreView (CSP)"""
+        pass
+
     def process(self, request, project, key, auth, helper, data, attachments=None, **kwargs):
         metrics.incr('events.total')
 
@@ -375,25 +376,25 @@ class StoreView(APIView):
 
         remote_addr = request.META['REMOTE_ADDR']
 
-        data = LazyData(
-            data=data,
-            content_encoding=request.META.get('HTTP_CONTENT_ENCODING', ''),
-            helper=helper,
+        event_mgr = EventManager(
+            data,
             project=project,
             key=key,
             auth=auth,
             client_ip=remote_addr,
+            user_agent=helper.context.agent,
+            content_encoding=request.META.get('HTTP_CONTENT_ENCODING', ''),
         )
+        del data
 
-        event_received.send_robust(
-            ip=remote_addr,
-            project=project,
-            sender=type(self),
-        )
+        self.pre_normalize(event_mgr, helper)
+        event_mgr.normalize()
+
+        event_received.send_robust(ip=remote_addr, project=project, sender=type(self))
+
         start_time = time()
         tsdb_start_time = to_datetime(start_time)
-        should_filter, filter_reason = helper.should_filter(
-            project, data, ip_address=remote_addr)
+        should_filter, filter_reason = event_mgr.should_filter()
         if should_filter:
             increment_list = [
                 (tsdb.models.project_total_received, project.id),
@@ -437,8 +438,7 @@ class StoreView(APIView):
         # it cannot cascade
         if rate_limit is None or rate_limit.is_limited:
             if rate_limit is None:
-                helper.log.debug(
-                    'Dropped event due to error with rate limiter')
+                api_logger.debug('Dropped event due to error with rate limiter')
             tsdb.incr_multi(
                 [
                     (tsdb.models.project_total_received, project.id),
@@ -479,6 +479,9 @@ class StoreView(APIView):
 
         org_options = OrganizationOption.objects.get_all_values(
             project.organization_id)
+
+        data = event_mgr.get_data()
+        del event_mgr
 
         event_id = data['event_id']
 
@@ -527,7 +530,7 @@ class StoreView(APIView):
 
         cache.set(cache_key, '', 60 * 5)
 
-        helper.log.debug('New event received (%s)', event_id)
+        api_logger.debug('New event received (%s)', event_id)
 
         event_accepted.send_robust(
             ip=remote_addr,
@@ -564,7 +567,6 @@ class MinidumpView(StoreView):
 
         project = self._get_project_from_id(project_id)
         helper.context.bind_project(project)
-        raven.tags_context(helper.context.get_tags_context())
 
         # This is yanking the auth from the querystring since it's not
         # in the POST body. This means we expect a `sentry_key` and
@@ -576,7 +578,6 @@ class MinidumpView(StoreView):
             raise APIError('Two different projects were specified')
 
         helper.context.bind_auth(auth)
-        raven.tags_context(helper.context.get_tags_context())
 
         return super(APIView, self).dispatch(
             request=request, project=project, auth=auth, helper=helper, key=key, **kwargs
@@ -738,7 +739,6 @@ class SecurityReportView(StoreView):
 
         project = self._get_project_from_id(project_id)
         helper.context.bind_project(project)
-        raven.tags_context(helper.context.get_tags_context())
 
         # This is yanking the auth from the querystring since it's not
         # in the POST body. This means we expect a `sentry_key` and
@@ -750,14 +750,13 @@ class SecurityReportView(StoreView):
             raise APIError('Two different projects were specified')
 
         helper.context.bind_auth(auth)
-        raven.tags_context(helper.context.get_tags_context())
 
         return super(APIView, self).dispatch(
             request=request, project=project, auth=auth, helper=helper, key=key, **kwargs
         )
 
     def post(self, request, project, helper, **kwargs):
-        json_body = helper.safely_load_json_string(request.body)
+        json_body = safely_load_json_string(request.body)
         report_type = self.security_report_type(json_body)
         if report_type is None:
             raise APIError('Unrecognized security report type')
@@ -801,6 +800,9 @@ class SecurityReportView(StoreView):
                 if k in body:
                     return report_type_for_key[k]
         return None
+
+    def pre_normalize(self, data, helper):
+        data.process_csp_report()
 
 
 @cache_control(max_age=3600, public=True)

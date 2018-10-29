@@ -35,10 +35,10 @@ example/db.sqlite
 /test_cli/
 Gemfile.lock
 .idea/
+*.iml
 .pytest_cache/
 .vscode/tags
 coverage.xml
 junit.xml
 *.codestyle.xml
-.pytest_cache/
 package-lock.json

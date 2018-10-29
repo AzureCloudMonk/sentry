@@ -2,6 +2,7 @@ import React from 'react';
 import {Flex} from 'grid-emotion';
 import createReactClass from 'create-react-class';
 import {browserHistory} from 'react-router';
+import jQuery from 'jquery';
 import OrganizationState from 'app/mixins/organizationState';
 import LoadingIndicator from 'app/components/loadingIndicator';
 import {t} from 'app/locale';
@@ -39,20 +40,20 @@ const OrganizationDiscoverContainer = createReactClass({
   },
 
   componentDidMount: function() {
+    jQuery(document.body).addClass('body-discover');
+
     const {savedQueryId} = this.props.params;
     const {search} = this.props.location;
     const {organization} = this.context;
 
     if (savedQueryId) {
-      this.fetchSavedQuery(savedQueryId);
+      this.fetchSavedQuery(savedQueryId).then(this.loadTags);
     } else {
       this.queryBuilder = createQueryBuilder(
         getQueryFromQueryString(search),
         organization
       );
-      this.queryBuilder.load().then(() => {
-        this.setState({isLoading: false});
-      });
+      this.loadTags();
     }
   },
 
@@ -71,13 +72,23 @@ const OrganizationDiscoverContainer = createReactClass({
     }
   },
 
+  componentWillUnmount: function() {
+    jQuery(document.body).removeClass('body-discover');
+  },
+
+  loadTags: function() {
+    this.queryBuilder.load().then(() => {
+      this.setState({isLoading: false});
+    });
+  },
+
   fetchSavedQuery: function(savedQueryId) {
     const {organization} = this.context;
 
-    fetchSavedQuery(organization, savedQueryId)
+    return fetchSavedQuery(organization, savedQueryId)
       .then(resp => {
         if (this.queryBuilder) {
-          this.queryBuilder.reset(resp);
+          this.queryBuilder.reset(parseSavedQuery(resp));
         } else {
           this.queryBuilder = createQueryBuilder(parseSavedQuery(resp), organization);
         }
@@ -95,6 +106,24 @@ const OrganizationDiscoverContainer = createReactClass({
 
   updateSavedQuery: function(savedQuery) {
     this.setState({savedQuery});
+  },
+
+  toggleEditMode: function() {
+    const {organization} = this.context;
+    const {savedQuery} = this.state;
+    const isEditingSavedQuery = this.props.location.query.editing === 'true';
+
+    const newQuery = {...this.props.location.query};
+    if (!isEditingSavedQuery) {
+      newQuery.editing = 'true';
+    } else {
+      delete newQuery.editing;
+    }
+
+    browserHistory.push({
+      pathname: `/organizations/${organization.slug}/discover/saved/${savedQuery.id}/`,
+      query: newQuery,
+    });
   },
 
   renderComingSoon: function() {
@@ -123,6 +152,7 @@ const OrganizationDiscoverContainer = createReactClass({
 
   render() {
     const {isLoading, savedQuery, view} = this.state;
+
     const {location, params} = this.props;
     const hasFeature = this.getFeatures().has('discover');
 
@@ -139,8 +169,10 @@ const OrganizationDiscoverContainer = createReactClass({
             location={location}
             params={params}
             savedQuery={savedQuery}
+            isEditingSavedQuery={this.props.location.query.editing === 'true'}
             updateSavedQueryData={this.updateSavedQuery}
             view={view}
+            toggleEditMode={this.toggleEditMode}
           />
         )}
       </DiscoverWrapper>

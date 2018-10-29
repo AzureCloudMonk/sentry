@@ -19,13 +19,13 @@ from rest_framework.views import APIView
 from simplejson import JSONDecodeError
 
 from sentry import tsdb
-from sentry.app import raven
 from sentry.auth import access
 from sentry.models import Environment
 from sentry.utils.cursors import Cursor
 from sentry.utils.dates import to_datetime
 from sentry.utils.http import absolute_uri, is_valid_origin
 from sentry.utils.audit import create_audit_entry
+from sentry.utils.sdk import capture_exception
 from sentry.utils import json
 
 
@@ -92,7 +92,7 @@ class Endpoint(APIView):
             import sys
             import traceback
             sys.stderr.write(traceback.format_exc())
-            event_id = raven.captureException()
+            event_id = capture_exception()
             context = {
                 'detail': 'Internal Error',
                 'errorId': event_id,
@@ -223,7 +223,7 @@ class Endpoint(APIView):
 
     def paginate(
         self, request, on_results=None, paginator=None,
-        paginator_cls=Paginator, default_per_page=100, **paginator_kwargs
+        paginator_cls=Paginator, default_per_page=100, max_per_page=100, **paginator_kwargs
     ):
         assert (paginator and not paginator_kwargs) or (paginator_cls and paginator_kwargs)
 
@@ -234,7 +234,7 @@ class Endpoint(APIView):
         else:
             input_cursor = None
 
-        assert per_page <= max(100, default_per_page)
+        assert per_page <= max(max_per_page, default_per_page)
 
         if not paginator:
             paginator = paginator_cls(**paginator_kwargs)
